@@ -51,15 +51,16 @@ jobs:
           latexml \
             --path="$BINDINGS" \
             --preload=ar5iv.sty \
-            --preamble='\usepackage[iflimit=3599999]{latexml}' \
+            --preamble='\usepackage[iflimit=3599999,tokenlimit=999999999]{latexml}' \
             --dest=/tmp/paper-out.xml \
             main.tex 2>&1 | tee /tmp/conversion.log
           echo "latexml exit: $?"
 
       - name: Check result
+        if: always()
         shell: bash
         run: |
-          if grep -q "if_limit" /tmp/conversion.log; then
+          if grep -q "if_limit" /tmp/conversion.log 2>/dev/null; then
             echo "FAIL: Hit iflimit — patch did not work"
             grep "if_limit" /tmp/conversion.log
             exit 1
