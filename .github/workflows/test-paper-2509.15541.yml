@@ -20,9 +20,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: dginev/ar5iv-bindings
-          path: /opt/ar5iv-bindings
+          path: ar5iv-bindings
 
-      - name: Install patched LaTeXML over system latexml
+      - name: Install patched LaTeXML
         shell: bash
         run: |
           source /usr/local/perlbrew/etc/bashrc
@@ -35,7 +35,6 @@ jobs:
       - name: Download arXiv 2509.15541 source
         shell: bash
         run: |
-          apt-get install -y --no-install-recommends curl ca-certificates 2>/dev/null || true
           mkdir -p /tmp/paper
           curl -sL "https://arxiv.org/src/2509.15541" -o /tmp/paper/source.tar.gz
           cd /tmp/paper && tar xzf source.tar.gz
@@ -46,12 +45,9 @@ jobs:
         run: |
           source /usr/local/perlbrew/etc/bashrc
           cd /tmp/paper
-          # ar5iv uses:
-          #   --path for bindings directory (so package stubs are found)
-          #   --preload=ar5iv (loads the ar5iv.sty.ltxml preamble)
-          #   iflimit=3599999 injected via latexml package
+          BINDINGS="$GITHUB_WORKSPACE/ar5iv-bindings/bindings"
           latexml \
-            --path=/opt/ar5iv-bindings/bindings \
+            --path="$BINDINGS" \
             --preload=ar5iv.sty \
             --preamble='\usepackage[iflimit=3599999]{latexml}' \
             --dest=/tmp/paper-out.xml \
@@ -61,15 +57,12 @@ jobs:
       - name: Check result
         shell: bash
         run: |
-          echo "=== Checking for iflimit fatal ==="
           if grep -q "if_limit" /tmp/conversion.log; then
             echo "FAIL: Hit iflimit — patch did not work"
             grep "if_limit" /tmp/conversion.log
             exit 1
           fi
           echo "PASS: No iflimit hit"
-          echo ""
-          echo "=== Last 5 lines of conversion log ==="
           tail -5 /tmp/conversion.log
 
       - name: Upload conversion log
