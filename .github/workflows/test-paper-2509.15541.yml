@@ -1,0 +1,69 @@
+name: Test paper 2509.15541 conversion
+
+on:
+  push:
+    branches: [fix-iflimit-false-positive]
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/tkw1536/latexml-test-runtime:2024-5.38
+      options: --entrypoint ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install patched LaTeXML over system latexml
+        shell: bash
+        run: |
+          source /usr/local/perlbrew/etc/bashrc
+          cpanm --notest --installdeps .
+          perl Makefile.PL PREFIX=/usr/local
+          make
+          make install
+
+      - name: Clone ar5iv-bindings
+        run: |
+          git clone https://github.com/dginev/ar5iv-bindings.git /opt/ar5iv-bindings
+
+      - name: Download arXiv 2509.15541 source
+        run: |
+          mkdir -p /tmp/paper
+          curl -sL "https://arxiv.org/src/2509.15541" -o /tmp/paper/source.tar.gz
+          cd /tmp/paper && tar xzf source.tar.gz
+
+      - name: Convert paper with ar5iv-style latexml invocation
+        shell: bash
+        run: |
+          source /usr/local/perlbrew/etc/bashrc
+          cd /tmp/paper
+          # Replicate ar5iv's invocation: inject iflimit=3599999 via preamble,
+          # load ar5iv.sty.ltxml bindings, convert to XML
+          latexml \
+            --preload=/opt/ar5iv-bindings/bindings/ar5iv.sty.ltxml \
+            --preamble='\usepackage[iflimit=3599999]{latexml}' \
+            --dest=/tmp/paper-out.xml \
+            main.tex 2>&1 | tee /tmp/conversion.log
+          echo "Exit code: $?"
+
+      - name: Check result
+        run: |
+          echo "=== Checking for iflimit fatal ==="
+          if grep -q "if_limit" /tmp/conversion.log; then
+            echo "FAIL: Hit iflimit"
+            grep "if_limit" /tmp/conversion.log
+            exit 1
+          else
+            echo "PASS: No iflimit hit"
+          fi
+          echo "=== Last 20 lines of conversion log ==="
+          tail -20 /tmp/conversion.log
+
+      - name: Upload conversion log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversion-log
+          path: /tmp/conversion.log
