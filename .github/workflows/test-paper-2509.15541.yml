@@ -44,14 +44,19 @@ jobs:
 
       - name: Convert paper (replicating ar5iv invocation)
         shell: bash
+        # continue-on-error so Check result always runs and is the gate
+        continue-on-error: true
         run: |
           source /usr/local/perlbrew/etc/bashrc
           cd /tmp/paper
           BINDINGS="$GITHUB_WORKSPACE/ar5iv-bindings/bindings"
+          # ar5iv.sty.ltxml sets tokenlimit=249999999; strip it so the
+          # conversion runs uncapped (production ar5iv doesn't cap tokens).
+          sed -i "s/, 'tokenlimit=[0-9]*'//" "$BINDINGS/ar5iv.sty.ltxml" || true
           latexml \
             --path="$BINDINGS" \
             --preload=ar5iv.sty \
-            --preamble='\usepackage[iflimit=3599999,tokenlimit=999999999]{latexml}' \
+            --preamble='\usepackage[iflimit=3599999]{latexml}' \
             --dest=/tmp/paper-out.xml \
             main.tex 2>&1 | tee /tmp/conversion.log
           echo "latexml exit: $?"
@@ -66,7 +71,10 @@ jobs:
             exit 1
           fi
           echo "PASS: No iflimit hit"
+          echo "=== Final conversion lines ==="
           tail -5 /tmp/conversion.log
+          # Fail the job if conversion didn't complete at all (no log file)
+          test -f /tmp/conversion.log || { echo "FAIL: No conversion log produced"; exit 1; }
 
       - name: Upload conversion log
         if: always()
