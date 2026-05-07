@@ -35,8 +35,10 @@ jobs:
       - name: Download arXiv 2509.15541 source
         shell: bash
         run: |
+          apt-get update -qq && apt-get install -y --no-install-recommends curl 2>/dev/null || true
           mkdir -p /tmp/paper
-          curl -sL "https://arxiv.org/src/2509.15541" -o /tmp/paper/source.tar.gz
+          python3 -c "import urllib.request; urllib.request.urlretrieve('https://arxiv.org/src/2509.15541', '/tmp/paper/source.tar.gz')" \
+            || curl -sL "https://arxiv.org/src/2509.15541" -o /tmp/paper/source.tar.gz
           cd /tmp/paper && tar xzf source.tar.gz
           ls /tmp/paper/
 
