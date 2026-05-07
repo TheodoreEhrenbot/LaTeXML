@@ -99,6 +99,7 @@ my %IGNORED_SYMBOLS = map { $_ => 1; }
   value:MATH_LIGATURES
   value:TEXT_LIGATURES
   value:if_count
+  value:if_baseline
   value:absorb_count),
   # \lnot, \to let to \neg, \rightarrow in pre 2017 TeXlive; gratuitously screws up tests
   qw(

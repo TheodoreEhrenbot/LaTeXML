@@ -60,9 +60,15 @@ sub invoke_conditional {
   # Keep a stack of the conditionals we are processing.
   my $ifid = $STATE->lookupValue('if_count') || 0;
   $STATE->assignValue(if_count => ++$ifid, 'global');
-  if ($LaTeXML::IF_LIMIT and $ifid > $LaTeXML::IF_LIMIT) {
-    Fatal('timeout', 'if_limit', $self,
-      "Conditional limit of $LaTeXML::IF_LIMIT exceeded, infinite loop?"); }
+  # Check against conditionals evaluated since the if_stack last drained to empty.
+  # This avoids false positives on large documents with many sequential conditionals
+  # (e.g. heavy TikZ/pgfplots use) while still catching real infinite loops where
+  # the if_stack never empties between conditional evaluations.
+  if ($LaTeXML::IF_LIMIT) {
+    my $baseline = $STATE->lookupValue('if_baseline') || 0;
+    if ($ifid - $baseline > $LaTeXML::IF_LIMIT) {
+      Fatal('timeout', 'if_limit', $self,
+        "Conditional limit of $LaTeXML::IF_LIMIT exceeded, infinite loop?"); } }
   local $LaTeXML::IFFRAME = { token => $LaTeXML::CURRENT_TOKEN, start => $gullet->getLocator,
     parsing => 1, elses => 0, ifid => $ifid };
   $STATE->unshiftValue(if_stack => $LaTeXML::IFFRAME);
@@ -140,6 +146,9 @@ sub skipConditionalBody {
         shift(@$stack); }           # then DO pop that conditional's frame; it's DONE!
       elsif (!--$level) {           # If no more nesting, we're done.
         shift(@$stack);             # Done with this frame
+        # Reset baseline when the if_stack is now completely empty.
+        unless (@$stack) {
+          $STATE->assignValue(if_baseline => $STATE->lookupValue('if_count') || 0, 'global'); }
         return TokensI($t); } }     # AND Return the finishing token.
     elsif ($level > 1) { }                                    # Ignore \else,\or nested in the body.
     elsif (($cond_type eq 'or') && (++$n_ors == $nskips)) {
@@ -192,6 +201,11 @@ sub invoke_fi {
   else {                            # "expand" by removing the stack entry for this level
     local $LaTeXML::IFFRAME = $$stack[0];
     $STATE->shiftValue('if_stack');    # Done with this frame
+    # When the if_stack drains completely, reset the baseline so that the iflimit
+    # guard only fires for actual runaway loops, not for large flat documents.
+    my $remaining = $STATE->lookupValue('if_stack');
+    unless ($remaining && @$remaining) {
+      $STATE->assignValue(if_baseline => $STATE->lookupValue('if_count') || 0, 'global'); }
     Debug('{' . ToString($LaTeXML::CURRENT_TOKEN) . '}'
         . " [for " . Stringify($$LaTeXML::IFFRAME{token}) . " #" . $$LaTeXML::IFFRAME{ifid} . "]")
       if ($STATE->lookupValue('TRACING') || 0) & TRACE_COMMANDS;
