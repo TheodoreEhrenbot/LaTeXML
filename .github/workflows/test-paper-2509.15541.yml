@@ -48,23 +48,20 @@ jobs:
           perl -i -pe "s/, 'tokenlimit=[0-9]*'//g; s/, 'iflimit=[0-9]*'//g; s/, 'absorblimit=[0-9]*'//g; s/, 'pushbacklimit=[0-9]*'//g;" "$BINDINGS/ar5iv.sty.ltxml" || true
           # Stub tcolorbox theorem library using perl (no python3 needed)
           # tcbtheorems.code.tex uses expl3 that LaTeXML cannot execute.
+          # The stub must be tcbtheorems.code.tex.ltxml — latexml intercepts
+          # \input{tcbtheorems.code.tex} and uses the .ltxml if it exists.
+          # Also stub NewCommandCopy.sty.ltxml (luatex/latex3 command).
           perl -e '
             use strict; use warnings;
-            my $path = $ENV{GITHUB_WORKSPACE} . "/ar5iv-bindings/bindings/tcolorbox.theorems.sty.ltxml";
-            open(my $fh, ">", $path) or die "Cannot write $path: $!";
-            print $fh <<'"'"'STUB'"'"';
-          package LaTeXML::Package::Pool;
-          use strict; use warnings; use LaTeXML::Package;
-          DefMacro(q{\newtcbtheorem[]{}{}{}{}}, sub { () });
-          DefMacro(q{\RenewTcbTheorem[]{}{}{}{}}, sub { () });
-          DefMacro(q{\NewCommandCopy{}{}}, sub { () });
-          DefMacro(q{\thetcbcounter}, q{});
-          NewCounter(q{tcbcounter});
-          1;
-          STUB
-            close $fh;
-            print "Wrote $path\n";
-          '
+            my $base = $ENV{GITHUB_WORKSPACE} . "/ar5iv-bindings/bindings/";
+            # Main stub: intercepts \input{tcbtheorems.code.tex}
+            my $stub = qq{package LaTeXML::Package::Pool;\nuse strict; use warnings; use LaTeXML::Package;\nDefMacro(q{\\newtcbtheorem[]{}{}{}{}}, sub { () });\nDefMacro(q{\\RenewTcbTheorem[]{}{}{}{}}, sub { () });\nDefMacro(q{\\NewCommandCopy{}{}}, sub { () });\nDefMacro(q{\\thetcbcounter}, q{});\nNewCounter(q{tcbcounter});\n1;\n};
+            for my $name (qw(tcbtheorems.code.tex tcbtheorems.code)) {
+              open(my $fh, ">", $base . $name . ".ltxml") or die;
+              print $fh $stub;
+              close $fh;
+              print "Wrote $name.ltxml\n";
+            }'
 
       - name: Convert paper
         shell: bash
