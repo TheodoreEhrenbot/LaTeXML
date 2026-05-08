@@ -60,6 +60,27 @@ jobs:
             s/, 'absorblimit=[0-9]*'//g;
             s/, 'pushbacklimit=[0-9]*'//g;
           " "$BINDINGS/ar5iv.sty.ltxml" || true
+
+          # Stub tcolorbox theorem commands: tcbtheorems.code.tex uses expl3
+          # that LaTeXML can't execute. Replace \newtcbtheorem etc. with
+          # simple \newtheorem wrappers so the paper environments still render.
+          cat > "$BINDINGS/tcolorbox.theorems.sty.ltxml" << 'LTXML'
+package LaTeXML::Package::Pool;
+use strict; use warnings; use LaTeXML::Package;
+# Stub tcolorbox theorem library — prevents loading tcbtheorems.code.tex
+# which uses expl3 syntax LaTeXML cannot process.
+DefMacro('\newtcbtheorem[]{}{}{}{}', sub {
+  my($gullet,$opt,$name,$title,$opts,$label) = @_;
+  my $n = ToString($name);
+  (T_CS('\newtheorem'), T_BEGIN, @{$name->unlist}, T_END,
+   T_BEGIN, @{$title->unlist}, T_END); });
+DefMacro('\RenewTcbTheorem[]{}{}{}{}', '\newtcbtheorem[#1]{#2}{#3}{#4}{#5}');
+DefMacro('\NewCommandCopy{}{}', '');
+DefMacro('\thetcbcounter', '\arabic{tcbcounter}');
+NewCounter('tcbcounter');
+1;
+LTXML
+
           latexml \
             --path="$BINDINGS" \
             --preload=ar5iv.sty \
