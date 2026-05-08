@@ -37,50 +37,38 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y --no-install-recommends curl 2>/dev/null || true
           mkdir -p /tmp/paper
-          python3 -c "import urllib.request; urllib.request.urlretrieve('https://arxiv.org/src/2509.15541', '/tmp/paper/source.tar.gz')" \
-            || curl -sL "https://arxiv.org/src/2509.15541" -o /tmp/paper/source.tar.gz
-          cd /tmp/paper && tar xzf source.tar.gz
-          ls /tmp/paper/
+          python3 -c "import urllib.request; urllib.request.urlretrieve('https://arxiv.org/src/2509.15541', '/tmp/paper/source.tar.gz')"
+          cd /tmp/paper && tar xzf source.tar.gz && ls /tmp/paper/
 
-      - name: Convert paper (replicating ar5iv invocation)
+      - name: Prepare bindings
         shell: bash
-        # continue-on-error so Check result always runs and is the gate
+        run: |
+          BINDINGS="$GITHUB_WORKSPACE/ar5iv-bindings/bindings"
+          # Strip all four ar5iv.sty limits (false positives on large documents)
+          perl -i -pe 's/, '"'"'tokenlimit=[0-9]*'"'"'//g; s/, '"'"'iflimit=[0-9]*'"'"'//g; s/, '"'"'absorblimit=[0-9]*'"'"'//g; s/, '"'"'pushbacklimit=[0-9]*'"'"'//g;' "$BINDINGS/ar5iv.sty.ltxml" || true
+          # Stub tcolorbox theorem library (tcbtheorems.code.tex uses expl3 LaTeXML can't execute)
+          python3 - <<'PYEOF'
+          import os, sys
+          stub = '''package LaTeXML::Package::Pool;
+          use strict; use warnings; use LaTeXML::Package;
+          DefMacro('\\\\newtcbtheorem[]{}{}{}{}', sub { () });
+          DefMacro('\\\\RenewTcbTheorem[]{}{}{}{}', sub { () });
+          DefMacro('\\\\NewCommandCopy{}{}', sub { () });
+          DefMacro('\\\\thetcbcounter', '');
+          NewCounter('tcbcounter');
+          1;'''
+          path = os.environ['GITHUB_WORKSPACE'] + '/ar5iv-bindings/bindings/tcolorbox.theorems.sty.ltxml'
+          open(path, 'w').write(stub)
+          print('Wrote', path)
+          PYEOF
+
+      - name: Convert paper
+        shell: bash
         continue-on-error: true
         run: |
           source /usr/local/perlbrew/etc/bashrc
           cd /tmp/paper
           BINDINGS="$GITHUB_WORKSPACE/ar5iv-bindings/bindings"
-          # Strip ALL four limits from ar5iv.sty.ltxml — they are all global
-          # monotonic counters that fire falsely on complex documents.
-          # Production ar5iv would need to raise/remove them all to convert
-          # this paper successfully after the iflimit patch lands.
-          perl -i -pe "
-            s/, 'tokenlimit=[0-9]*'//g;
-            s/, 'iflimit=[0-9]*'//g;
-            s/, 'absorblimit=[0-9]*'//g;
-            s/, 'pushbacklimit=[0-9]*'//g;
-          " "$BINDINGS/ar5iv.sty.ltxml" || true
-
-          # Stub tcolorbox theorem commands: tcbtheorems.code.tex uses expl3
-          # that LaTeXML can't execute. Replace \newtcbtheorem etc. with
-          # simple \newtheorem wrappers so the paper environments still render.
-          cat > "$BINDINGS/tcolorbox.theorems.sty.ltxml" << 'LTXML'
-package LaTeXML::Package::Pool;
-use strict; use warnings; use LaTeXML::Package;
-# Stub tcolorbox theorem library — prevents loading tcbtheorems.code.tex
-# which uses expl3 syntax LaTeXML cannot process.
-DefMacro('\newtcbtheorem[]{}{}{}{}', sub {
-  my($gullet,$opt,$name,$title,$opts,$label) = @_;
-  my $n = ToString($name);
-  (T_CS('\newtheorem'), T_BEGIN, @{$name->unlist}, T_END,
-   T_BEGIN, @{$title->unlist}, T_END); });
-DefMacro('\RenewTcbTheorem[]{}{}{}{}', '\newtcbtheorem[#1]{#2}{#3}{#4}{#5}');
-DefMacro('\NewCommandCopy{}{}', '');
-DefMacro('\thetcbcounter', '\arabic{tcbcounter}');
-NewCounter('tcbcounter');
-1;
-LTXML
-
           latexml \
             --path="$BINDINGS" \
             --preload=ar5iv.sty \
@@ -92,23 +80,17 @@ LTXML
         if: always()
         shell: bash
         run: |
-          # Check for any _limit fatal — all should be absent with limits stripped
           if grep -qE "if_limit|token_limit|pushback_limit|absorb_limit" /tmp/conversion.log 2>/dev/null; then
-            echo "FAIL: Hit a safety limit (should not fire with limits stripped)"
-            grep -E "_limit" /tmp/conversion.log
-            exit 1
+            echo "FAIL: Hit a safety limit"; grep -E "_limit" /tmp/conversion.log; exit 1
           fi
-          echo "=== Final conversion lines ==="
           tail -10 /tmp/conversion.log
-          # Gold standard: conversion must complete without Fatal errors
           if grep -q "^Conversion complete" /tmp/conversion.log 2>/dev/null; then
             echo "PASS: Paper converted to HTML successfully"
           elif grep -q "Fatal:" /tmp/conversion.log 2>/dev/null; then
-            echo "FAIL: Conversion still has a Fatal error (not a limit issue)"
-            grep "Fatal:" /tmp/conversion.log | tail -3
-            exit 1
+            echo "FAIL: Fatal error in conversion"
+            grep "Fatal:" /tmp/conversion.log | tail -3; exit 1
           else
-            echo "INFO: Conversion ran but completion status unclear"
+            echo "INFO: Conversion ran, status unclear"
           fi
 
       - name: Upload conversion log
