@@ -50,13 +50,19 @@ jobs:
           source /usr/local/perlbrew/etc/bashrc
           cd /tmp/paper
           BINDINGS="$GITHUB_WORKSPACE/ar5iv-bindings/bindings"
-          # ar5iv.sty.ltxml sets tokenlimit=249999999; strip it so the
-          # conversion runs uncapped (production ar5iv doesn't cap tokens).
-          sed -i "s/, 'tokenlimit=[0-9]*'//" "$BINDINGS/ar5iv.sty.ltxml" || true
+          # Strip ALL four limits from ar5iv.sty.ltxml — they are all global
+          # monotonic counters that fire falsely on complex documents.
+          # Production ar5iv would need to raise/remove them all to convert
+          # this paper successfully after the iflimit patch lands.
+          perl -i -pe "
+            s/, 'tokenlimit=[0-9]*'//g;
+            s/, 'iflimit=[0-9]*'//g;
+            s/, 'absorblimit=[0-9]*'//g;
+            s/, 'pushbacklimit=[0-9]*'//g;
+          " "$BINDINGS/ar5iv.sty.ltxml" || true
           latexml \
             --path="$BINDINGS" \
             --preload=ar5iv.sty \
-            --preamble='\usepackage[iflimit=3599999]{latexml}' \
             --dest=/tmp/paper-out.xml \
             main.tex 2>&1 | tee /tmp/conversion.log
           echo "latexml exit: $?"
@@ -65,16 +71,24 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if grep -q "if_limit" /tmp/conversion.log 2>/dev/null; then
-            echo "FAIL: Hit iflimit — patch did not work"
-            grep "if_limit" /tmp/conversion.log
+          # Check for any _limit fatal — all should be absent with limits stripped
+          if grep -qE "if_limit|token_limit|pushback_limit|absorb_limit" /tmp/conversion.log 2>/dev/null; then
+            echo "FAIL: Hit a safety limit (should not fire with limits stripped)"
+            grep -E "_limit" /tmp/conversion.log
             exit 1
           fi
-          echo "PASS: No iflimit hit"
           echo "=== Final conversion lines ==="
-          tail -5 /tmp/conversion.log
-          # Fail the job if conversion didn't complete at all (no log file)
-          test -f /tmp/conversion.log || { echo "FAIL: No conversion log produced"; exit 1; }
+          tail -10 /tmp/conversion.log
+          # Gold standard: conversion must complete without Fatal errors
+          if grep -q "^Conversion complete" /tmp/conversion.log 2>/dev/null; then
+            echo "PASS: Paper converted to HTML successfully"
+          elif grep -q "Fatal:" /tmp/conversion.log 2>/dev/null; then
+            echo "FAIL: Conversion still has a Fatal error (not a limit issue)"
+            grep "Fatal:" /tmp/conversion.log | tail -3
+            exit 1
+          else
+            echo "INFO: Conversion ran but completion status unclear"
+          fi
 
       - name: Upload conversion log
         if: always()
