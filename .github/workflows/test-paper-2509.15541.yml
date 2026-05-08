@@ -35,9 +35,9 @@ jobs:
       - name: Download arXiv 2509.15541 source
         shell: bash
         run: |
-          apt-get update -qq && apt-get install -y --no-install-recommends curl 2>/dev/null || true
+          apt-get update -qq && apt-get install -y --no-install-recommends curl ca-certificates 2>/dev/null
           mkdir -p /tmp/paper
-          python3 -c "import urllib.request; urllib.request.urlretrieve('https://arxiv.org/src/2509.15541', '/tmp/paper/source.tar.gz')"
+          curl -sL "https://arxiv.org/src/2509.15541" -o /tmp/paper/source.tar.gz
           cd /tmp/paper && tar xzf source.tar.gz && ls /tmp/paper/
 
       - name: Prepare bindings
@@ -45,22 +45,26 @@ jobs:
         run: |
           BINDINGS="$GITHUB_WORKSPACE/ar5iv-bindings/bindings"
           # Strip all four ar5iv.sty limits (false positives on large documents)
-          perl -i -pe 's/, '"'"'tokenlimit=[0-9]*'"'"'//g; s/, '"'"'iflimit=[0-9]*'"'"'//g; s/, '"'"'absorblimit=[0-9]*'"'"'//g; s/, '"'"'pushbacklimit=[0-9]*'"'"'//g;' "$BINDINGS/ar5iv.sty.ltxml" || true
-          # Stub tcolorbox theorem library (tcbtheorems.code.tex uses expl3 LaTeXML can't execute)
-          python3 - <<'PYEOF'
-          import os, sys
-          stub = '''package LaTeXML::Package::Pool;
+          perl -i -pe "s/, 'tokenlimit=[0-9]*'//g; s/, 'iflimit=[0-9]*'//g; s/, 'absorblimit=[0-9]*'//g; s/, 'pushbacklimit=[0-9]*'//g;" "$BINDINGS/ar5iv.sty.ltxml" || true
+          # Stub tcolorbox theorem library using perl (no python3 needed)
+          # tcbtheorems.code.tex uses expl3 that LaTeXML cannot execute.
+          perl -e '
+            use strict; use warnings;
+            my $path = $ENV{GITHUB_WORKSPACE} . "/ar5iv-bindings/bindings/tcolorbox.theorems.sty.ltxml";
+            open(my $fh, ">", $path) or die "Cannot write $path: $!";
+            print $fh <<'"'"'STUB'"'"';
+          package LaTeXML::Package::Pool;
           use strict; use warnings; use LaTeXML::Package;
-          DefMacro('\\\\newtcbtheorem[]{}{}{}{}', sub { () });
-          DefMacro('\\\\RenewTcbTheorem[]{}{}{}{}', sub { () });
-          DefMacro('\\\\NewCommandCopy{}{}', sub { () });
-          DefMacro('\\\\thetcbcounter', '');
-          NewCounter('tcbcounter');
-          1;'''
-          path = os.environ['GITHUB_WORKSPACE'] + '/ar5iv-bindings/bindings/tcolorbox.theorems.sty.ltxml'
-          open(path, 'w').write(stub)
-          print('Wrote', path)
-          PYEOF
+          DefMacro(q{\newtcbtheorem[]{}{}{}{}}, sub { () });
+          DefMacro(q{\RenewTcbTheorem[]{}{}{}{}}, sub { () });
+          DefMacro(q{\NewCommandCopy{}{}}, sub { () });
+          DefMacro(q{\thetcbcounter}, q{});
+          NewCounter(q{tcbcounter});
+          1;
+          STUB
+            close $fh;
+            print "Wrote $path\n";
+          '
 
       - name: Convert paper
         shell: bash
